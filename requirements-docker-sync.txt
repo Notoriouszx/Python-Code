@@ -1,0 +1,2 @@
+# Optional sync driver for tooling / SQLAlchemy; not imported by the app runtime path.
+psycopg2-binary==2.9.9

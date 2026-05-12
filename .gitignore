@@ -216,3 +216,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Biometric service: large artifacts (use cloud storage / CI secrets)
+models/*.pkl
+models/*.pt
+*.pth
+
+.env.local
+
+# IDE (project-specific)
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
