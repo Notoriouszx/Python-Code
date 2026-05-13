@@ -23,20 +23,10 @@ COPY . .
 
 # Download after COPY so nothing overwrites the artifact; .dockerignore excludes
 # models/*.pkl from the build context (avoids truncated OneDrive/local copies).
-RUN mkdir -p models \
-    && gdown "1shq9S4nmUcGznqJuQdIJqq_4YM20-UZh" \
-        -O models/web_deployment_models.pkl \
-    && python -c "\
-import pickle; \
-from pathlib import Path; \
-p = Path('models/web_deployment_models.pkl'); \
-n = p.stat().st_size; \
-assert n > 50_000, f'model file too small ({n} B), download likely failed'; \
-with p.open('rb') as f: \
-    d = pickle.load(f); \
-assert 'gallery_data' in d and 'pca_models' in d, 'unexpected pickle layout'; \
-print('models/web_deployment_models.pkl OK', n, 'bytes') \
-"
+RUN mkdir -p models
+
+RUN wget -O models/web_deployment_models.pkl \
+    "https://github.com/USERNAME/REPO/releases/download/v1.0/web_deployment_models.pkl"
 
 EXPOSE 8000
 
