@@ -12,7 +12,7 @@ async def get_pool() -> Optional[asyncpg.Pool]:
     if not settings.DATABASE_URL:
         return None
     if _pool is None:
-        _pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=10)
+        _pool = await asyncpg.create_pool(settings.DATABASE_URL, ssl=Require, min_size=1, max_size=10)
     return _pool
 
 
