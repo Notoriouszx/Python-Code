@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 
 # Add to Dockerfile
-RUN wget -O models/web_deployment_models.pkl "https://drive.google.com/drive/folders/1vUFHWfAb0kypL-mk0di8TVeCCXHMQRsd/web_deployment_models.pkl
+RUN wget -O models/web_deployment_models.pkl "https://drive.google.com/drive/folders/1vUFHWfAb0kypL-mk0di8TVeCCXHMQRsd/web_deployment_models.pkl"
 
 COPY requirements.txt requirements-docker-ml.txt requirements-docker-sync.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
