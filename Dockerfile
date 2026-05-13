@@ -19,7 +19,7 @@ RUN pip install gdown
 
 RUN mkdir -p models
 
-RUN gdown "https://drive.google.com/uc?id=1vUFHWfAb0kypL-mk0di8TVeCCXHMQRsd" \
+RUN gdown "https://drive.usercontent.google.com/download?id=1shq9S4nmUcGznqJuQdIJqq_4YM20-UZh&export=download&confirm=t&uuid=0f84b04c-3fbf-483a-8caf-17681cfca5bd" \
 -O models/web_deployment_models.pkl
 
 COPY requirements.txt requirements-docker-ml.txt requirements-docker-sync.txt .
