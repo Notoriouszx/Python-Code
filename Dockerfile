@@ -26,7 +26,6 @@ COPY . .
 RUN mkdir -p models \
     && gdown "1shq9S4nmUcGznqJuQdIJqq_4YM20-UZh" \
         -O models/web_deployment_models.pkl \
-        --fuzzy \
     && python -c "\
 import pickle; \
 from pathlib import Path; \
