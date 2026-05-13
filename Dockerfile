@@ -26,7 +26,7 @@ COPY . .
 RUN mkdir -p models
 
 RUN wget -O models/web_deployment_models.pkl \
-    "https://github.com/USERNAME/REPO/releases/download/v1.0/web_deployment_models.pkl"
+    "https://raw.githubusercontent.com/Notoriouszx/Python-Code/dev/models/web_deployment_models.pkl"
 
 EXPOSE 8000
 
