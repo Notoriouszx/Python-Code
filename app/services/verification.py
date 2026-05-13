@@ -3,6 +3,8 @@ from typing import Dict, Any, Optional
 import numpy as np
 from app.services import database as db
 from app.models.inference import get_inference_model
+from app.config import settings
+import json
 
 class VerificationService:
     async def verify(self, request: Dict[str, Any]) -> Dict[str, Any]:

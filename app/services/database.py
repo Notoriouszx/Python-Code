@@ -1,8 +1,10 @@
-# app/services/database.py (add these to init_schema)
-from typing import Any, Optional
+# app/services/database.py
+from typing import Any, Optional, Dict
 from urllib.parse import urlparse
+import json
 
 import asyncpg
+import numpy as np  # ADD THIS IMPORT
 
 from app.config import settings
 
@@ -139,7 +141,7 @@ async def save_biometric_template(user_id: int, modality: str, embedding: np.nda
             ON CONFLICT (user_id, modality) 
             DO UPDATE SET embedding = $3, updated_at = NOW()
             """,
-            user_id, modality, embedding_list
+            user_id, modality, json.dumps(embedding_list)
         )
 
 
@@ -165,8 +167,10 @@ async def get_biometric_templates(user_id: int) -> Dict[str, np.ndarray]:
         embedding_data = row['embedding']
         # Convert JSON/list back to numpy array
         if isinstance(embedding_data, str):
-            import json
             embedding_data = json.loads(embedding_data)
+        elif isinstance(embedding_data, dict):
+            # Handle if it's already a dict
+            embedding_data = list(embedding_data.values()) if hasattr(embedding_data, 'values') else embedding_data
         templates[modality] = np.array(embedding_data)
     
     return templates
@@ -178,7 +182,6 @@ async def log_verification_attempt(user_id: int, verified: bool, confidence: flo
     if pool is None:
         return
     
-    import json
     async with pool.acquire() as conn:
         await conn.execute(
             """
