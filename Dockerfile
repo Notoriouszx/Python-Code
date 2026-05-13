@@ -13,23 +13,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-
-# Add to Dockerfile
-RUN pip install gdown
-
-RUN mkdir -p models
-
-RUN gdown "https://drive.usercontent.google.com/download?id=1shq9S4nmUcGznqJuQdIJqq_4YM20-UZh&export=download&confirm=t&uuid=0f84b04c-3fbf-483a-8caf-17681cfca5bd" \
--O models/web_deployment_models.pkl
-
 COPY requirements.txt requirements-docker-ml.txt requirements-docker-sync.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir -r requirements-docker-ml.txt \
-    && pip install --no-cache-dir -r requirements-docker-sync.txt
+    && pip install --no-cache-dir -r requirements-docker-sync.txt \
+    && pip install --no-cache-dir "gdown>=5.0.0"
 
 COPY . .
 
-RUN mkdir -p /app/models
+# Download after COPY so nothing overwrites the artifact; .dockerignore excludes
+# models/*.pkl from the build context (avoids truncated OneDrive/local copies).
+RUN mkdir -p models \
+    && gdown "1shq9S4nmUcGznqJuQdIJqq_4YM20-UZh" \
+        -O models/web_deployment_models.pkl \
+        --fuzzy \
+    && python -c "\
+import pickle; \
+from pathlib import Path; \
+p = Path('models/web_deployment_models.pkl'); \
+n = p.stat().st_size; \
+assert n > 50_000, f'model file too small ({n} B), download likely failed'; \
+with p.open('rb') as f: \
+    d = pickle.load(f); \
+assert 'gallery_data' in d and 'pca_models' in d, 'unexpected pickle layout'; \
+print('models/web_deployment_models.pkl OK', n, 'bytes') \
+"
 
 EXPOSE 8000
 
