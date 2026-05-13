@@ -2,9 +2,10 @@
 from typing import Any, Optional, Dict
 from urllib.parse import urlparse
 import json
+import uuid
 
 import asyncpg
-import numpy as np  # ADD THIS IMPORT
+import numpy as np
 
 from app.config import settings
 
@@ -46,58 +47,64 @@ async def close_pool() -> None:
 
 
 async def init_schema() -> None:
+    """Initialize schema - only create tables if they don't exist"""
     pool = await get_pool()
     if pool is None:
+        print("No DATABASE_URL configured, skipping schema initialization")
         return
+    
     async with pool.acquire() as conn:
-        # Existing users table
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS biometric_users (
-                user_id SERIAL PRIMARY KEY,
-                display_name TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            """
-        )
-        
-        # NEW: Table for storing biometric templates/embeddings
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS biometric_sample (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES biometric_users(user_id) ON DELETE CASCADE,
-                modality VARCHAR(50) NOT NULL,
-                embedding JSONB NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                UNIQUE(user_id, modality)
-            );
-            """
-        )
-        
-        # NEW: Table for logging verification attempts
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS biometric_attempt (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES biometric_users(user_id) ON DELETE CASCADE,
-                verified BOOLEAN NOT NULL,
-                confidence FLOAT NOT NULL,
-                scores JSONB,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            """
-        )
-        
-        # Create indexes for better performance
-        await conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_biometric_sample_user_id ON biometric_sample(user_id);
-            CREATE INDEX IF NOT EXISTS idx_biometric_attempt_user_id ON biometric_attempt(user_id);
-            CREATE INDEX IF NOT EXISTS idx_biometric_attempt_created_at ON biometric_attempt(created_at);
-            """
-        )
+        # Check if biometric_users exists
+        try:
+            # Create biometric_users if not exists
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS biometric_users (
+                    user_id SERIAL PRIMARY KEY,
+                    display_name TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            print("✓ biometric_users table ready")
+            
+            # Create biometric_sample if not exists (matching your schema)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS biometric_sample (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    modality TEXT NOT NULL,
+                    embedding JSONB NOT NULL,
+                    quality DOUBLE PRECISION,
+                    "isActive" BOOLEAN DEFAULT true,
+                    "capturedAt" TIMESTAMPTZ DEFAULT NOW(),
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            print("✓ biometric_sample table ready")
+            
+            # Create biometric_attempt if not exists
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS biometric_attempt (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    verified BOOLEAN NOT NULL,
+                    confidence FLOAT NOT NULL,
+                    scores JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            print("✓ biometric_attempt table ready")
+            
+            # Create indexes if they don't exist
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_biometric_sample_user_id ON biometric_sample(user_id);
+                CREATE INDEX IF NOT EXISTS idx_biometric_attempt_user_id ON biometric_attempt(user_id);
+            """)
+            
+        except Exception as e:
+            print(f"Warning: Schema initialization issue: {e}")
+            # Don't fail - just continue
 
 
 async def insert_user(display_name: Optional[str]) -> int:
@@ -124,7 +131,7 @@ async def user_exists(user_id: int) -> bool:
         return int(n or 0) > 0
 
 
-async def save_biometric_template(user_id: int, modality: str, embedding: np.ndarray) -> None:
+async def save_biometric_template(user_id: int, modality: str, embedding: np.ndarray, quality: float = 0.0) -> None:
     """Save or update a biometric template for a user"""
     pool = await get_pool()
     if pool is None:
@@ -132,17 +139,34 @@ async def save_biometric_template(user_id: int, modality: str, embedding: np.nda
     
     # Convert numpy array to list for JSON storage
     embedding_list = embedding.tolist()
+    template_id = str(uuid.uuid4())
     
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO biometric_sample (user_id, modality, embedding, created_at, updated_at)
-            VALUES ($1, $2, $3, NOW(), NOW())
-            ON CONFLICT (user_id, modality) 
-            DO UPDATE SET embedding = $3, updated_at = NOW()
-            """,
-            user_id, modality, json.dumps(embedding_list)
+        # Check if template exists for this user and modality
+        existing = await conn.fetchrow(
+            "SELECT id FROM biometric_sample WHERE user_id = $1 AND modality = $2",
+            str(user_id), modality
         )
+        
+        if existing:
+            # Update existing template
+            await conn.execute(
+                """
+                UPDATE biometric_sample 
+                SET embedding = $3, quality = $4, updated_at = NOW()
+                WHERE user_id = $1 AND modality = $2
+                """,
+                str(user_id), modality, json.dumps(embedding_list), quality
+            )
+        else:
+            # Insert new template
+            await conn.execute(
+                """
+                INSERT INTO biometric_sample (id, user_id, modality, embedding, quality, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                """,
+                template_id, str(user_id), modality, json.dumps(embedding_list), quality
+            )
 
 
 async def get_biometric_templates(user_id: int) -> Dict[str, np.ndarray]:
@@ -156,9 +180,9 @@ async def get_biometric_templates(user_id: int) -> Dict[str, np.ndarray]:
             """
             SELECT modality, embedding 
             FROM biometric_sample 
-            WHERE user_id = $1
+            WHERE user_id = $1 AND "isActive" = true
             """,
-            user_id
+            str(user_id)
         )
     
     templates = {}
@@ -169,7 +193,6 @@ async def get_biometric_templates(user_id: int) -> Dict[str, np.ndarray]:
         if isinstance(embedding_data, str):
             embedding_data = json.loads(embedding_data)
         elif isinstance(embedding_data, dict):
-            # Handle if it's already a dict
             embedding_data = list(embedding_data.values()) if hasattr(embedding_data, 'values') else embedding_data
         templates[modality] = np.array(embedding_data)
     
@@ -193,4 +216,4 @@ async def log_verification_attempt(user_id: int, verified: bool, confidence: flo
 
 
 def is_configured() -> bool:
-    return bool(settings.DATABASE_URL.strip())
+    return bool(settings.DATABASE_URL and settings.DATABASE_URL.strip())
