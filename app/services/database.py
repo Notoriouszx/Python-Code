@@ -1,4 +1,5 @@
-from typing import Optional
+from typing import Any, Optional
+from urllib.parse import urlparse
 
 import asyncpg
 
@@ -7,12 +8,30 @@ from app.config import settings
 _pool: Optional[asyncpg.Pool] = None
 
 
+def _pool_connect_kwargs(url: str) -> dict[str, Any]:
+    """Build asyncpg pool kwargs. SSL is explicit unless sslmode= is already in the DSN."""
+    kwargs: dict[str, Any] = {"min_size": 1, "max_size": 10}
+    if "sslmode=" in url.lower():
+        return kwargs
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        kwargs["ssl"] = True
+        return kwargs
+    # Local / docker-compose postgres (see docker-compose.yml service name `db`) without TLS
+    if host in ("localhost", "127.0.0.1", "::1", "db"):
+        kwargs["ssl"] = False
+    else:
+        kwargs["ssl"] = True
+    return kwargs
+
+
 async def get_pool() -> Optional[asyncpg.Pool]:
     global _pool
     if not settings.DATABASE_URL:
         return None
     if _pool is None:
-        _pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=10)
+        _pool = await asyncpg.create_pool(settings.DATABASE_URL, **_pool_connect_kwargs(settings.DATABASE_URL))
     return _pool
 
 
