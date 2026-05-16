@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     IRIS_WEIGHT: float = 0.428
 
     IDENTIFICATION_THRESHOLD: float = 0.85
-    VERIFICATION_THRESHOLD: float = 0.75
+    VERIFICATION_THRESHOLD: float = 0.85
 
     JWT_SECRET: str = os.getenv("JWT_SECRET", "your-secret-key-change-this")
     JWT_ALGORITHM: str = "HS256"
