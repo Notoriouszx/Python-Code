@@ -131,58 +131,67 @@ async def user_exists(user_id: int) -> bool:
         return int(n or 0) > 0
 
 
-async def save_biometric_template(user_id: int, modality: str, embedding: np.ndarray, quality: float = 0.0) -> None:
-    """Save or update a biometric template for a user"""
+async def save_biometric_template(user_id: str, modality: str, embedding: np.ndarray, quality: float = 0.0) -> None:
+    """Save or update a biometric template for a user (Prisma biometric_sample table)."""
     pool = await get_pool()
     if pool is None:
         raise RuntimeError("DATABASE_URL is not configured")
-    
-    # Convert numpy array to list for JSON storage
+
+    uid = str(user_id).strip()
     embedding_list = embedding.tolist()
     template_id = str(uuid.uuid4())
-    
+
     async with pool.acquire() as conn:
-        # Check if template exists for this user and modality
         existing = await conn.fetchrow(
-            "SELECT id FROM biometric_sample WHERE user_id = $1 AND modality = $2",
-            str(user_id), modality
+            '''
+            SELECT id FROM biometric_sample
+            WHERE "userId" = $1 AND modality = $2 AND "isActive" = true
+            ''',
+            uid,
+            modality,
         )
-        
+
         if existing:
-            # Update existing template
             await conn.execute(
-                """
-                UPDATE biometric_sample 
-                SET embedding = $3, quality = $4, updated_at = NOW()
-                WHERE user_id = $1 AND modality = $2
-                """,
-                str(user_id), modality, json.dumps(embedding_list), quality
+                '''
+                UPDATE biometric_sample
+                SET embedding = $3::jsonb, quality = $4, "capturedAt" = NOW()
+                WHERE "userId" = $1 AND modality = $2 AND "isActive" = true
+                ''',
+                uid,
+                modality,
+                json.dumps(embedding_list),
+                quality,
             )
         else:
-            # Insert new template
             await conn.execute(
-                """
-                INSERT INTO biometric_sample (id, user_id, modality, embedding, quality, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                """,
-                template_id, str(user_id), modality, json.dumps(embedding_list), quality
+                '''
+                INSERT INTO biometric_sample (id, "userId", modality, embedding, quality, "isActive", "capturedAt")
+                VALUES ($1, $2, $3, $4::jsonb, $5, true, NOW())
+                ''',
+                template_id,
+                uid,
+                modality,
+                json.dumps(embedding_list),
+                quality,
             )
 
 
-async def get_biometric_templates(user_id: int) -> Dict[str, np.ndarray]:
-    """Retrieve all biometric templates for a user"""
+async def get_biometric_templates(user_id: str) -> Dict[str, np.ndarray]:
+    """Retrieve all active biometric templates for a user."""
     pool = await get_pool()
     if pool is None:
         return {}
-    
+
+    uid = str(user_id).strip()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """
-            SELECT modality, embedding 
-            FROM biometric_sample 
-            WHERE user_id = $1 AND "isActive" = true
-            """,
-            str(user_id)
+            '''
+            SELECT modality, embedding
+            FROM biometric_sample
+            WHERE "userId" = $1 AND "isActive" = true
+            ''',
+            uid,
         )
     
     templates = {}
@@ -199,20 +208,31 @@ async def get_biometric_templates(user_id: int) -> Dict[str, np.ndarray]:
     return templates
 
 
-async def log_verification_attempt(user_id: int, verified: bool, confidence: float, scores: Dict[str, float]) -> None:
-    """Log a verification attempt for auditing"""
+async def log_verification_attempt(
+    user_id: str, verified: bool, confidence: float, scores: Dict[str, float]
+) -> None:
+    """Log a verification attempt (best-effort; Prisma table may differ)."""
     pool = await get_pool()
     if pool is None:
         return
-    
+
+    attempt_id = str(uuid.uuid4())
+    uid = str(user_id).strip()
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO biometric_attempt (user_id, verified, confidence, scores, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
-            """,
-            user_id, verified, confidence, json.dumps(scores)
-        )
+        try:
+            await conn.execute(
+                '''
+                INSERT INTO biometric_attempt (id, "userId", success, confidence, "modalityUsed", "createdAt")
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ''',
+                attempt_id,
+                uid,
+                verified,
+                confidence,
+                "fusion",
+            )
+        except Exception as exc:
+            print(f"Failed to log attempt: {exc}")
 
 
 def is_configured() -> bool:

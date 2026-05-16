@@ -24,7 +24,7 @@ class IdentifyResponse(BaseModel):
 
 
 class VerifyRequest(BiometricImages):
-    user_id: int = Field(..., ge=1, description="1-based user id matching gallery labels")
+    user_id: str = Field(..., min_length=1, description="Prisma user id (cuid string)")
 
 
 class VerifyResponse(BaseModel):
@@ -35,14 +35,15 @@ class VerifyResponse(BaseModel):
 
 
 class EnrollRequest(BiometricImages):
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     display_name: Optional[str] = None
 
 
 class EnrollResponse(BaseModel):
     success: bool
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     message: str = ""
+    embeddings: Dict[str, List[float]] = Field(default_factory=dict)
 
 
 class GalleryRecord(BaseModel):

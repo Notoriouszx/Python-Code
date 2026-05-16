@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -51,20 +51,16 @@ async def frontend_verify(request_data: dict):
     Your backend expects: VerifyRequest with same field names actually!
     """
     try:
-        # Extract user_id and convert to int if needed (your backend expects int)
         user_id = request_data.get("user_id")
         if not user_id:
             raise HTTPException(status_code=400, detail="user_id is required")
-        
-        # Convert user_id to int (your VerifyRequest expects int)
-        try:
-            user_id_int = int(user_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="user_id must be a valid integer")
-        
-        # Create a VerifyRequest object that matches your backend's expected format
+
+        user_id_str = str(user_id).strip()
+        if not user_id_str:
+            raise HTTPException(status_code=400, detail="user_id must be non-empty")
+
         verify_request = VerifyRequest(
-            user_id=user_id_int,
+            user_id=user_id_str,
             face_image=request_data.get("face_image"),
             fingerprint_image=request_data.get("fingerprint_image"),
             iris_image=request_data.get("iris_image"),
