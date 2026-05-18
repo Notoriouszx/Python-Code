@@ -5,7 +5,7 @@ import uuid
 
 from app.models.biometric import EnrollRequest, EnrollResponse
 from app.services import database as db
-from app.services.extraction import extract_embeddings_with_reports
+from app.services.extraction import extract_embeddings_from_request
 from app.models.inference import get_inference_model
 
 router = APIRouter()
@@ -37,18 +37,11 @@ async def enroll(request: EnrollRequest) -> EnrollResponse:
 
         uid = str(request.user_id).strip()
 
-        embeddings, reports, reject_errors = await extract_embeddings_with_reports(
+        embeddings = await extract_embeddings_from_request(
             request.face_image,
             request.fingerprint_image,
             request.iris_image,
         )
-
-        if reject_errors:
-            return EnrollResponse(
-                success=False,
-                user_id=uid,
-                message="; ".join(reject_errors),
-            )
 
         if not embeddings:
             return EnrollResponse(
@@ -63,10 +56,7 @@ async def enroll(request: EnrollRequest) -> EnrollResponse:
                 embedding.tolist() if isinstance(embedding, np.ndarray) else list(embedding)
             )
             embeddings_json[modality] = embedding_list
-            quality_score = reports.get(modality).combined_quality if modality in reports else 0.0
-            await db.save_biometric_template(
-                uid, modality, np.array(embedding_list), quality=quality_score
-            )
+            await db.save_biometric_template(uid, modality, np.array(embedding_list))
 
         return EnrollResponse(
             success=True,

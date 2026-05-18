@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from app.config import settings
 from app.models.biometric import IdentifyRequest, IdentifyResponse
 from app.models.inference import get_inference_model
-from app.services.extraction import extract_embeddings_with_reports
+from app.services.extraction import extract_embeddings_from_request
 
 router = APIRouter()
 
@@ -11,13 +11,11 @@ router = APIRouter()
 @router.post("/identify", response_model=IdentifyResponse)
 async def identify(request: IdentifyRequest) -> IdentifyResponse:
     model = get_inference_model()
-    embeddings, _, reject_errors = await extract_embeddings_with_reports(
+    embeddings = await extract_embeddings_from_request(
         request.face_image,
         request.fingerprint_image,
         request.iris_image,
     )
-    if reject_errors:
-        raise HTTPException(status_code=400, detail="; ".join(reject_errors))
     if not embeddings:
         raise HTTPException(status_code=400, detail="No valid biometric images provided")
 
