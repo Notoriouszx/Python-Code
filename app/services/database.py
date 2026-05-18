@@ -1,7 +1,11 @@
-from typing import Any, Optional
+# app/services/database.py
+from typing import Any, Optional, Dict
 from urllib.parse import urlparse
+import json
+import uuid
 
 import asyncpg
+import numpy as np
 
 from app.config import settings
 
@@ -43,19 +47,64 @@ async def close_pool() -> None:
 
 
 async def init_schema() -> None:
+    """Initialize schema - only create tables if they don't exist"""
     pool = await get_pool()
     if pool is None:
+        print("No DATABASE_URL configured, skipping schema initialization")
         return
+    
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS biometric_users (
-                user_id SERIAL PRIMARY KEY,
-                display_name TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            """
-        )
+        # Check if biometric_users exists
+        try:
+            # Create biometric_users if not exists
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS biometric_users (
+                    user_id SERIAL PRIMARY KEY,
+                    display_name TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            print("✓ biometric_users table ready")
+            
+            # Create biometric_sample if not exists (matching your schema)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS biometric_sample (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    modality TEXT NOT NULL,
+                    embedding JSONB NOT NULL,
+                    quality DOUBLE PRECISION,
+                    "isActive" BOOLEAN DEFAULT true,
+                    "capturedAt" TIMESTAMPTZ DEFAULT NOW(),
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            print("✓ biometric_sample table ready")
+            
+            # Create biometric_attempt if not exists
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS biometric_attempt (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    verified BOOLEAN NOT NULL,
+                    confidence FLOAT NOT NULL,
+                    scores JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            print("✓ biometric_attempt table ready")
+            
+            # Create indexes if they don't exist
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_biometric_sample_user_id ON biometric_sample(user_id);
+                CREATE INDEX IF NOT EXISTS idx_biometric_attempt_user_id ON biometric_attempt(user_id);
+            """)
+            
+        except Exception as e:
+            print(f"Warning: Schema initialization issue: {e}")
+            # Don't fail - just continue
 
 
 async def insert_user(display_name: Optional[str]) -> int:
@@ -82,5 +131,109 @@ async def user_exists(user_id: int) -> bool:
         return int(n or 0) > 0
 
 
+async def save_biometric_template(user_id: str, modality: str, embedding: np.ndarray, quality: float = 0.0) -> None:
+    """Save or update a biometric template for a user (Prisma biometric_sample table)."""
+    pool = await get_pool()
+    if pool is None:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    uid = str(user_id).strip()
+    embedding_list = embedding.tolist()
+    template_id = str(uuid.uuid4())
+
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            '''
+            SELECT id FROM biometric_sample
+            WHERE "userId" = $1 AND modality = $2 AND "isActive" = true
+            ''',
+            uid,
+            modality,
+        )
+
+        if existing:
+            await conn.execute(
+                '''
+                UPDATE biometric_sample
+                SET embedding = $3::jsonb, quality = $4, "capturedAt" = NOW()
+                WHERE "userId" = $1 AND modality = $2 AND "isActive" = true
+                ''',
+                uid,
+                modality,
+                json.dumps(embedding_list),
+                quality,
+            )
+        else:
+            await conn.execute(
+                '''
+                INSERT INTO biometric_sample (id, "userId", modality, embedding, quality, "isActive", "capturedAt")
+                VALUES ($1, $2, $3, $4::jsonb, $5, true, NOW())
+                ''',
+                template_id,
+                uid,
+                modality,
+                json.dumps(embedding_list),
+                quality,
+            )
+
+
+async def get_biometric_templates(user_id: str) -> Dict[str, np.ndarray]:
+    """Retrieve all active biometric templates for a user."""
+    pool = await get_pool()
+    if pool is None:
+        return {}
+
+    uid = str(user_id).strip()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            '''
+            SELECT modality, embedding
+            FROM biometric_sample
+            WHERE "userId" = $1 AND "isActive" = true
+            ''',
+            uid,
+        )
+    
+    templates = {}
+    for row in rows:
+        modality = row['modality']
+        embedding_data = row['embedding']
+        # Convert JSON/list back to numpy array
+        if isinstance(embedding_data, str):
+            embedding_data = json.loads(embedding_data)
+        elif isinstance(embedding_data, dict):
+            embedding_data = list(embedding_data.values()) if hasattr(embedding_data, 'values') else embedding_data
+        templates[modality] = np.array(embedding_data)
+    
+    return templates
+
+
+async def log_verification_attempt(
+    user_id: str, verified: bool, confidence: float, scores: Dict[str, float]
+) -> None:
+    """Log a verification attempt (best-effort; Prisma table may differ)."""
+    pool = await get_pool()
+    if pool is None:
+        return
+
+    attempt_id = str(uuid.uuid4())
+    uid = str(user_id).strip()
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute(
+                '''
+                INSERT INTO biometric_attempt (id, "userId", success, confidence, "modalityUsed", "createdAt")
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ''',
+                attempt_id,
+                uid,
+                verified,
+                confidence,
+                "fusion",
+            )
+        except Exception as exc:
+            print(f"Failed to log attempt: {exc}")
+
+
 def is_configured() -> bool:
-    return bool(settings.DATABASE_URL.strip())
+    return bool(settings.DATABASE_URL and settings.DATABASE_URL.strip())

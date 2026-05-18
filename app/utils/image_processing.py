@@ -1,6 +1,7 @@
 import base64
+import hashlib
 import io
-from typing import Optional
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
@@ -9,12 +10,17 @@ from PIL import Image
 from app.config import settings
 
 
-def _decode_base64_image(base64_image: str) -> Image.Image:
+def _decode_base64_image(base64_image: str) -> Tuple[Image.Image, bytes]:
     raw = base64_image
     if "," in raw:
         raw = raw.split(",", 1)[1]
     image_bytes = base64.b64decode(raw)
-    return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    return Image.open(io.BytesIO(image_bytes)).convert("RGB"), image_bytes
+
+
+def _content_seed(image_bytes: bytes, modality: str) -> int:
+    digest = hashlib.sha256(image_bytes + modality.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") % (2**32)
 
 
 def _embedding_dim_for_modality(modality: str) -> int:
@@ -49,18 +55,13 @@ async def extract_embedding_from_image(
     or already match gallery dimension if you skip PCA.
     """
     try:
-        image = _decode_base64_image(base64_image)
+        image, image_bytes = _decode_base64_image(base64_image)
         image = image.resize((224, 224))
         bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
         dim = _embedding_dim_for_modality(modality)
-        if modality == "fingerprint":
-            feats = cv2.resize(gray, (32, 32)).astype(np.float64).ravel()
-        elif modality == "iris":
-            feats = cv2.resize(gray, (32, 32)).astype(np.float64).ravel()
-        else:
-            feats = cv2.resize(gray, (32, 32)).astype(np.float64).ravel()
+        feats = cv2.resize(gray, (32, 32)).astype(np.float64).ravel()
 
         if feats.size < dim:
             pad = np.zeros(dim - feats.size, dtype=np.float64)
@@ -68,8 +69,9 @@ async def extract_embedding_from_image(
         elif feats.size > dim:
             feats = feats[:dim]
 
-        rng = np.random.default_rng(hash(modality) % (2**32))
-        mix = rng.standard_normal(dim) * 0.05
+        # Image-dependent noise (modality-only seed made unrelated images match).
+        rng = np.random.default_rng(_content_seed(image_bytes, modality))
+        mix = rng.standard_normal(dim) * 0.02
         embedding = feats / (np.linalg.norm(feats) + 1e-8) + mix
         embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
         return embedding.astype(np.float64)
