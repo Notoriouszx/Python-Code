@@ -80,7 +80,10 @@ async def frontend_verify(request_data: dict):
             "confidence": result.confidence,
             "scores": result.scores,
             "message": result.message,
-            "quality": {}  # Your backend might not return quality yet
+            "quality": result.quality,
+            "quality_by_modality": result.quality_by_modality,
+            "checks": result.checks,
+            "threshold_used": result.threshold_used,
         }
         
     except HTTPException:

@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,10 @@ class VerifyResponse(BaseModel):
     confidence: float = 0.0
     scores: Dict[str, float] = Field(default_factory=dict)
     message: str = ""
+    quality: float = 0.0
+    quality_by_modality: Dict[str, float] = Field(default_factory=dict)
+    checks: Dict[str, Any] = Field(default_factory=dict)
+    threshold_used: Optional[float] = None
 
 
 class EnrollRequest(BiometricImages):

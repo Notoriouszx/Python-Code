@@ -20,6 +20,15 @@ def _tiny_png_b64() -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def _textured_png_b64(size: tuple[int, int] = (224, 224)) -> str:
+    import numpy as np
+
+    arr = np.random.randint(35, 210, (*size, 3), dtype=np.uint8)
+    buf = BytesIO()
+    Image.fromarray(arr, mode="RGB").save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def test_health(client: TestClient):
     r = client.get("/health")
     assert r.status_code == 200
@@ -35,7 +44,7 @@ def test_root(client: TestClient):
 
 
 def test_identify_accepts_payload(client: TestClient):
-    b64 = _tiny_png_b64()
+    b64 = _textured_png_b64()
     r = client.post(
         "/api/v1/identify",
         json={
@@ -55,11 +64,20 @@ def test_identify_rejects_empty(client: TestClient):
     assert r.status_code == 400
 
 
-def test_verify_payload(client: TestClient):
+def test_identify_rejects_low_quality(client: TestClient):
     b64 = _tiny_png_b64()
+    r = client.post("/api/v1/identify", json={"face_image": b64})
+    assert r.status_code == 400
+
+
+def test_verify_payload(client: TestClient):
+    b64 = _textured_png_b64()
     r = client.post(
         "/api/v1/verify",
-        json={"user_id": 1, "face_image": b64},
+        json={"user_id": "test-user", "face_image": b64},
     )
     assert r.status_code == 200
-    assert "verified" in r.json()
+    body = r.json()
+    assert "verified" in body
+    assert "quality" in body
+    assert "checks" in body

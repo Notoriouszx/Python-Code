@@ -31,13 +31,21 @@ async def verify(request: VerifyRequest) -> VerifyResponse:
         return VerifyResponse(
             verified=False,
             confidence=0.0,
-            scores={},
+            scores=result.get("scores", {}),
             message=result["error"],
+            quality=float(result.get("quality", 0.0)),
+            quality_by_modality=result.get("quality_by_modality", {}),
+            checks=result.get("checks", {}),
+            threshold_used=result.get("threshold_used"),
         )
-    
+
     return VerifyResponse(
         verified=result.get("verified", False),
         confidence=result.get("confidence", 0.0),
         scores=result.get("scores", {}),
         message=result.get("message", "Verification completed"),
+        quality=float(result.get("quality", 0.0)),
+        quality_by_modality=result.get("quality_by_modality", {}),
+        checks=result.get("checks", {}),
+        threshold_used=result.get("threshold_used"),
     )
